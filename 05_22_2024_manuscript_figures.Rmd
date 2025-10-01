@@ -1,0 +1,1844 @@
+---
+title: "Only keeping figures relevant for manuscript"
+date: '2024-05-22'
+output:
+  html_document:
+    theme: journal
+    df_print: paged
+---
+
+
+
+```{r setup, include=FALSE}
+library(DESeq2)
+library(tximport)
+library(GenomicRanges)
+library(GenomeInfoDb)
+library(tidyverse)
+library(devtools)
+library(ggplot2)
+library(here)
+library(ComplexHeatmap)
+library(ChIPseeker)
+library(RColorBrewer)
+library(rtracklayer)
+library(GenomicRanges)
+library(gplots)
+library(reshape2)
+library(reshape)
+library(circlize)
+library(stringr)
+library(readr)
+library(readxl)
+#library(GenomicFeatures)
+library(cowplot)
+
+```
+
+# maize project {.tabset}
+
+## importing rsem data {.tabset}
+
+resources:\
+\*
+<https://bioconductor.org/packages/release/bioc/vignettes/tximport/inst/doc/tximport.html#Introduction>\
+\* <https://github.com/bli25/RSEM_tutorial?tab=readme-ov-file>\
+
+```{r}
+
+dir = system.file("extdata", package = "tximportData")
+list.files(dir)
+
+getwd()
+
+
+```
+
+for deg, compare b73 and mo17 lift off.\
+I need to run rsem 5 times for the 5 conditions. and I need to read in
+the correct samples for each condition.
+
+```{r, eval=F}
+getwd()
+SRR_file_version3=read_tsv("SRR_file_version3.tsv")
+SRR_file_version3$fq1=paste0(SRR_file_version3$SRR_ID, "_1.fastq")
+SRR_file_version3$fq2=paste0(SRR_file_version3$SRR_ID, "_2.fastq")
+
+SRR_file_version3=SRR_file_version3 %>% 
+  mutate(ref = case_when(
+    organism == "B73" ~ "B73_genome_B73_liftoff_gff/ref",
+    organism == "Mo17" ~ "Mo17_genome_B73_liftoff_gff/ref"
+  ))
+
+SRR_file_version3$sample_name=paste0(str_extract(SRR_file_version3$ref,"^[^/]+"),"/",SRR_file_version3$SRR_ID,"_paired_end_qual")
+
+
+write_tsv(SRR_file_version3, "SRR_file_version3_for_rsem.tsv")
+SRR_file_version3
+
+```
+
+```{r, eval=F}
+
+SRR_file_version1= read_tsv("SRR_file_names.tsv")
+SRR_file_version2= read_tsv("SRR_file_v2.tsv")
+
+SRR_file_version1=SRR_file_version1[c(6:7),]
+SRR_file_version2
+
+SRR_file_version1
+SRR_file_version2
+SRR_file_version3
+
+SRR_file_final=rbind(rbind(SRR_file_version1,SRR_file_version2),SRR_file_version3)
+
+new_SRR_file=read_tsv("for_rsem_SRR_file_v4.txt")
+
+new_SRR_file
+unique(new_SRR_file$condition)
+
+SRR_file_final=rbind(new_SRR_file,SRR_file_final)
+
+SRR_file_final
+```
+
+
+
+```{r, eval=F}
+SRR_file_final$results=paste0(SRR_file_final$sample_name,".genes.results")
+SRR_file_final
+
+write.csv(SRR_file_final, "./05_22_2024_manuscript_data/SRR_file_final.csv")
+
+
+filing_funct= function (condition_name){
+  test_vec=c((SRR_file_final %>% dplyr::filter(condition == as.character(condition_name)))$results)
+  names(test_vec)= str_extract(test_vec, "SRR\\d+")
+  return(test_vec)
+}
+
+
+ 
+
+tassel_files=filing_funct("tassel_v12")
+seedling_files= filing_funct("11_day_seedling_leaf")
+embryo_files = filing_funct("embryo_27DAP")
+meristem_files=filing_funct("11 day meristem")
+ear_files=filing_funct("ear_v14")
+
+blade_files=filing_funct("blade_v12")
+coleoptile_files=filing_funct("coleoptile_tip")
+radicle_files= filing_funct("radicle_root")
+root_files= filing_funct("root_0DAP")
+
+```
+
+
+
+
+
+## testing for consistency between gene ids: {.tabset}
+
+```{r, eval=F}
+#meristem_files
+
+read.table("Mo17_genome_B73_liftoff_gff/SRR7548342_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+read.table("B73_genome_B73_liftoff_gff//SRR7548337_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+
+#seedling_files
+
+read.table("B73_genome_B73_liftoff_gff/SRR7548394_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+read.table("Mo17_genome_B73_liftoff_gff/SRR7548396_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+
+#ear_files
+
+read.table("B73_genome_B73_liftoff_gff/SRR7548231_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+read.table("Mo17_genome_B73_liftoff_gff/SRR7548236_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+
+#blade files: 
+read.table("B73_genome_B73_liftoff_gff/SRR7548306_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
+
+
+```
+
+
+
+
+## filtering rsem data {.tabset}
+
+
+```{r, eval=F}
+
+
+txi_ear = tximport(ear_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_tassel = tximport(tassel_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_seedling = tximport(seedling_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_embryo = tximport(embryo_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_meristem = tximport(meristem_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+
+txi_blade = tximport(blade_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_coleoptile = tximport(coleoptile_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_radicle = tximport(radicle_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+txi_root = tximport(root_files, type = "rsem", txIn = FALSE, txOut = FALSE)
+
+txi_ear$length[txi_ear$length == 0] = 1
+txi_tassel$length[txi_tassel$length == 0] = 1
+txi_seedling$length[txi_seedling$length == 0] = 1
+txi_embryo$length[txi_embryo$length == 0] = 1
+txi_meristem$length[txi_meristem$length == 0] = 1
+txi_blade$length[txi_blade$length ==0]=1
+txi_coleoptile$length[txi_coleoptile$length==0]=1
+txi_radicle$length[txi_radicle$length==0]=1
+txi_root$length[txi_root$length==0]=1
+
+
+txi_list=list(txi_ear,
+     txi_tassel,
+     txi_seedling,
+     txi_embryo,
+     txi_meristem, 
+     txi_blade,
+     txi_coleoptile,
+     txi_radicle,
+     txi_root)
+
+
+```
+
+
+
+
+Abundance dataframes for Mary: 
+
+```{r, eval=F}
+
+test=tximport(ear_files, type = "rsem", txIn = FALSE, txOut = FALSE, abundanceCol = TPM)
+head(txi_ear$abundance)
+head(test$abundance)
+### so the abundance columns in our txi objects are in TPM. 
+
+
+txi_ear_abund=as.data.frame(txi_ear$abundance)
+txi_tassel_abund=as.data.frame(txi_tassel$abundance)
+txi_seedling_abund=as.data.frame(txi_seedling$abundance)
+txi_embryo_abund=as.data.frame(txi_embryo$abundance)
+txi_meristem_abund=as.data.frame(txi_meristem$abundance)
+
+txi_blade_abund=as.data.frame(txi_blade$abundance)
+txi_coleoptile_abund=as.data.frame(txi_coleoptile$abundance)
+txi_radicle_abund=as.data.frame(txi_radicle$abundance)
+txi_root_abund=as.data.frame(txi_root$abundance)
+
+organizing_funct= function (txi_abund){
+  test= SRR_file_final %>% dplyr::filter(SRR_ID %in% colnames(txi_abund))
+  colnames(txi_abund)=  paste0(test$SRR_ID,sep="_",test$organism)
+  return(txi_abund)
+}
+
+
+txi_ear_abund=organizing_funct(txi_ear_abund)
+txi_tassel_abund=organizing_funct(txi_tassel_abund)
+txi_seedling_abund=organizing_funct(txi_seedling_abund)
+txi_embryo_abund=organizing_funct(txi_embryo_abund)
+txi_meristem_abund=organizing_funct(txi_meristem_abund)
+
+
+txi_blade_abund=organizing_funct(txi_blade_abund)
+txi_coleoptile_abund=organizing_funct(txi_coleoptile_abund)
+txi_radicle_abund=organizing_funct(txi_radicle_abund)
+txi_root_abund=organizing_funct(txi_root_abund)
+
+
+#### writing them: 
+
+write.csv(txi_ear_abund, "./04_29_2024_txi_abundance_tpm_files/txi_ear_abund.csv")
+write.csv(txi_tassel_abund, "./04_29_2024_txi_abundance_tpm_files/txi_tassel_abund.csv")
+write.csv(txi_seedling_abund, "./04_29_2024_txi_abundance_tpm_files/txi_seedling_abund.csv")
+write.csv(txi_embryo_abund, "./04_29_2024_txi_abundance_tpm_files/txi_embryo_abund.csv")
+write.csv(txi_meristem_abund, "./04_29_2024_txi_abundance_tpm_files/txi_meristem_abund.csv")
+
+write.csv(txi_blade_abund, "./04_29_2024_txi_abundance_tpm_files/txi_blade_abund.csv")
+write.csv(txi_coleoptile_abund, "./04_29_2024_txi_abundance_tpm_files/txi_coleoptile_abund.csv")
+write.csv(txi_radicle_abund, "./04_29_2024_txi_abundance_tpm_files/txi_radicle_abund.csv")
+write.csv(txi_root_abund, "./04_29_2024_txi_abundance_tpm_files/txi_root_abund.csv")
+
+
+
+```
+
+
+## DESeq2 {.tabset}
+
+make a new function for sample table that uses SRR_file_final table.
+
+```{r, eval=F}
+
+sample_table_funct= function (condition_name){
+  test=SRR_file_final %>% dplyr::filter(condition ==as.character(condition_name))
+  new_sampleTable= as.data.frame(test[,c("SRR_ID","organism")])
+  row.names(new_sampleTable)= new_sampleTable$SRR_ID
+  new_sampleTable= new_sampleTable %>% dplyr::select(organism,SRR_ID)
+  colnames(new_sampleTable)= c("condition", "SRR_ID")
+  new_sampleTable=new_sampleTable%>% mutate(condition= factor(condition, levels=c("Mo17", "B73")))
+  return(new_sampleTable)
+}
+
+sample_table_meristem= sample_table_funct("11 day meristem")
+sample_table_tassel= sample_table_funct("tassel_v12")
+sample_table_seedling= sample_table_funct("11_day_seedling_leaf")
+sample_table_embryo= sample_table_funct("embryo_27DAP")
+sample_table_ear= sample_table_funct("ear_v14")
+sample_table_blade= sample_table_funct("blade_v12")
+sample_table_coleoptile= sample_table_funct("coleoptile_tip")
+sample_table_radicle= sample_table_funct("radicle_root")
+sample_table_root= sample_table_funct("root_0DAP")
+
+```
+
+
+"blade_v12"      "coleoptile_tip" "radicle_root"   "root_0DAP"  
+
+## DESeq2 {.tabset}
+
+<https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#differential-expression-analysis>
+
+Reminder, we have 5 conditions: ear, tassel, seedling, embryo, meristem
+
+
+
+
+```{r, eval=F}
+dds_ear = DESeqDataSetFromTximport(txi_ear, sample_table_ear, ~ condition)
+dds_tassel= DESeqDataSetFromTximport(txi_tassel, sample_table_tassel, ~condition)
+dds_seedling= DESeqDataSetFromTximport(txi_seedling, sample_table_seedling, ~condition)
+dds_embryo= DESeqDataSetFromTximport(txi_embryo, sample_table_embryo, ~condition)
+dds_meristem= DESeqDataSetFromTximport(txi_meristem, sample_table_meristem, ~condition)
+
+dds_blade=DESeqDataSetFromTximport(txi_blade, sample_table_blade, ~condition)
+dds_coleoptile=DESeqDataSetFromTximport(txi_coleoptile, sample_table_coleoptile, ~condition)
+dds_radicle=DESeqDataSetFromTximport(txi_radicle, sample_table_radicle, ~condition)
+dds_root=DESeqDataSetFromTximport(txi_root, sample_table_root, ~condition)
+
+
+
+
+keep = rowSums(counts(dds_meristem) >= 10) >= 2
+summary(keep)
+dds_meristem = dds_meristem[keep,]
+
+keep = rowSums(counts(dds_ear) >= 10) >= 3
+summary(keep)
+dds_ear = dds_ear[keep,]
+
+keep = rowSums(counts(dds_tassel) >= 10) >= 3
+summary(keep)
+dds_tassel = dds_tassel[keep,]
+
+keep = rowSums(counts(dds_seedling) >= 10) >= 3
+summary(keep)
+dds_seedling = dds_seedling[keep,]
+
+keep = rowSums(counts(dds_embryo) >= 10) >= 3
+summary(keep)
+dds_embryo = dds_embryo[keep,]
+
+keep = rowSums(counts(dds_blade) >= 10) >= 3
+summary(keep)
+dds_blade = dds_blade[keep,]
+
+keep = rowSums(counts(dds_coleoptile) >= 10) >= 3
+summary(keep)
+dds_coleoptile = dds_coleoptile[keep,]
+
+keep = rowSums(counts(dds_radicle) >= 10) >= 3
+summary(keep)
+dds_radicle = dds_radicle[keep,]
+
+keep = rowSums(counts(dds_root) >= 10) >= 3
+summary(keep)
+dds_root = dds_root[keep,]
+
+suppressWarnings({
+
+dds_ear = DESeq(dds_ear)
+dds_meristem= DESeq(dds_meristem)
+dds_tassel=DESeq(dds_tassel)
+dds_embryo=DESeq(dds_embryo)
+dds_seedling=DESeq(dds_seedling)
+dds_blade=DESeq(dds_blade)
+dds_coleoptile=DESeq(dds_coleoptile)
+dds_radicle= DESeq(dds_radicle)
+dds_root=DESeq(dds_root)
+})
+
+```
+
+
+
+```{r, eval=F}
+
+res_ear=results(dds_ear, alpha=.05, independentFiltering=TRUE)
+res_meristem=results(dds_meristem, alpha=.05,independentFiltering=TRUE)
+res_tassel=results(dds_tassel, alpha=.05,independentFiltering=TRUE)
+res_embryo=results(dds_embryo, alpha=.05,independentFiltering=TRUE)
+res_seedling=results(dds_seedling, alpha=.05,independentFiltering=TRUE)
+res_blade= results(dds_blade, alpha = .05,independentFiltering=TRUE)
+res_coleoptile=results(dds_coleoptile, alpha=.05,independentFiltering=TRUE)
+res_radicle=results(dds_radicle, alpha=.05,independentFiltering=TRUE)
+res_root=results(dds_root, alpha = .05,independentFiltering=TRUE)
+
+res_list=list(res_ear,
+res_meristem,
+res_tassel,
+res_embryo,
+res_seedling, 
+res_blade, 
+res_coleoptile,
+res_radicle, 
+res_root)
+
+for (i in 1:9){
+  summary(res_list[[i]])
+}
+
+for (i in 1:9){
+  print(sum(res_list[[i]]$padj < 0.05, na.rm=TRUE))
+}
+
+```
+
+
+
+## DEG cut-offs {.tabset}
+
+```{r, eval=F}
+
+### DEG cut offs are : abs(log2fc) > 2 (so FC =4) and padj < 0.05  
+
+#for (i in 1:5){
+#  print(as.data.frame(res_list[[i]]) %>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2))
+#}
+
+
+df_res_ear=as.data.frame(res_ear)
+df_res_meristem=as.data.frame(res_meristem)
+df_res_tassel=as.data.frame(res_tassel)
+df_res_embryo=as.data.frame(res_embryo)
+df_res_seedling=as.data.frame(res_seedling)
+df_res_blade=as.data.frame(res_blade)
+df_res_coleoptile=as.data.frame(res_coleoptile)
+df_res_radicle=as.data.frame(res_radicle)
+df_res_root=as.data.frame(res_root)
+
+write.csv(df_res_ear, "./05_22_2024_manuscript_data/df_res_ear.csv")
+write.csv(df_res_meristem,"./05_22_2024_manuscript_data/df_res_meristem.csv")
+write.csv(df_res_tassel,"./05_22_2024_manuscript_data/df_res_tassel.csv")
+write.csv(df_res_embryo,"./05_22_2024_manuscript_data/df_res_embryo.csv")
+write.csv(df_res_seedling, "./05_22_2024_manuscript_data/df_res_seedling.csv")
+write.csv(df_res_blade, "./05_22_2024_manuscript_data/df_res_blade.csv")
+write.csv(df_res_coleoptile, "./05_22_2024_manuscript_data/df_res_coleoptile.csv")
+write.csv(df_res_radicle, "./05_22_2024_manuscript_data/df_res_radicle.csv")
+write.csv(df_res_root, "./05_22_2024_manuscript_data/df_res_root.csv")
+```
+
+```{r}
+df_res_ear=read.csv("./05_22_2024_manuscript_data/df_res_ear.csv", row.names = 1)
+df_res_meristem=read.csv("./05_22_2024_manuscript_data/df_res_meristem.csv", row.names = 1)
+df_res_tassel=read.csv("./05_22_2024_manuscript_data/df_res_tassel.csv", row.names = 1)
+df_res_embryo=read.csv("./05_22_2024_manuscript_data/df_res_embryo.csv", row.names = 1)
+df_res_seedling=read.csv("./05_22_2024_manuscript_data/df_res_seedling.csv", row.names = 1)
+df_res_blade=read.csv("./05_22_2024_manuscript_data/df_res_blade.csv", row.names = 1)
+df_res_coleoptile=read.csv("./05_22_2024_manuscript_data/df_res_coleoptile.csv", row.names = 1)
+df_res_radicle=read.csv("./05_22_2024_manuscript_data/df_res_radicle.csv", row.names = 1)
+df_res_root=read.csv("./05_22_2024_manuscript_data/df_res_root.csv", row.names = 1)
+```
+
+
+```{r}
+
+res_ear_DEG=df_res_ear%>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_meristem_DEG=df_res_meristem%>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_tassel_DEG=df_res_tassel%>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_embryo_DEG=df_res_embryo%>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_seedling_DEG=df_res_seedling%>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_blade_DEG=df_res_blade %>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_coleoptile_DEG= df_res_coleoptile %>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_radicle_DEG= df_res_radicle %>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+res_root_DEG= df_res_root %>% dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+
+sum(res_seedling_DEG$log2FoldChange > 0)
+sum(res_seedling_DEG$log2FoldChange < 0)
+
+```
+
+for log2fc is it B73 vs. Mo17 or Mo17 vs. B73? --\> sampletable =
+sampletable %\>% mutate(condition= factor(condition, levels=c("Mo17",
+"B73"))) --\> this means that Mo17 is the baseline so B73 would be
+either upregulated or downregulated in comparison. --\> log2FC \> 0
+means that expression is higher in B73. double check this by looking at
+some genes.
+
+**checking that DEGs are correct**
+
+```{r, eval=F}
+########### test 1: 
+
+res_ear_DEG["Zm00001eb000080",]
+# this means that B73 samples must be much more expressed than Mo17 samples. 
+
+SRR_file_final %>% dplyr::filter(condition == "ear_v14") %>% dplyr::select(organism, condition, SRR_ID)
+## SRR7548231, SRR7548230, 	SRR7548229 are the B73 samples
+
+txi_ear$counts["Zm00001eb000080",]
+txi_ear$abundance["Zm00001eb000080",]
+## this looks correct. 
+
+
+########### test 2: 
+
+res_meristem_DEG["Zm00001eb002620",]
+# this means that B73 samples must be much less expressed than Mo17 samples. 
+SRR_file_final %>% dplyr::filter(condition == "11 day meristem") %>% dplyr::select(organism, condition, SRR_ID)
+#SRR7548336, SRR7548337, SRR7548338 are the B73 examples. 
+txi_meristem$counts["Zm00001eb002620",]
+txi_meristem$counts["Zm00001eb002620",]
+## this looks correct. 
+
+########### test 3: 
+res_embryo_DEG["Zm00001eb000430",]
+# this means that B73 samples must be more expressed than Mo17 samples. 
+SRR_file_final %>% dplyr::filter(condition == "embryo_27DAP") %>% dplyr::select(organism, condition, SRR_ID)
+# SRR7548271, SRR7548270, SRR7548269 are the B73 examples
+txi_embryo$counts["Zm00001eb000430",]
+txi_embryo$abundance["Zm00001eb000430",]
+## this looks correct. 
+
+
+########### test 4: 
+
+res_blade_DEG["Zm00001eb001300",]
+# this means that B73 samples must be much less expressed than Mo17 samples. 
+
+SRR_file_final %>% dplyr::filter(condition == "blade_v12") %>% dplyr::select(organism, condition, SRR_ID)
+## SRR7548306, SRR7548307, 	SRR7548308 are the B73 samples
+
+txi_blade$counts["Zm00001eb001300",]
+txi_blade$abundance["Zm00001eb001300",]
+## this looks correct. 
+
+########### test 5: 
+
+res_radicle_DEG["Zm00001eb000450",]
+# this means that B73 samples must be much more expressed than Mo17 samples. 
+
+SRR_file_final %>% dplyr::filter(condition == "radicle_root") %>% dplyr::select(organism, condition, SRR_ID)
+## SRR7548284, SRR7548285, 	SRR7548282 are the B73 samples
+
+txi_radicle$counts["Zm00001eb000450",]
+txi_radicle$abundance["Zm00001eb000450",]
+## this looks correct.
+
+```
+
+```{r}
+write.csv(res_ear_DEG, "./05_22_2024_manuscript_data/res_ear_DEG.csv")
+write.csv(res_meristem_DEG,"./05_22_2024_manuscript_data/res_meristem_DEG.csv")
+write.csv(res_tassel_DEG,"./05_22_2024_manuscript_data/res_tassel_DEG.csv")
+write.csv(res_embryo_DEG,"./05_22_2024_manuscript_data/res_embryo_DEG.csv")
+write.csv(res_seedling_DEG,"./05_22_2024_manuscript_data/res_seedling_DEG.csv")
+write.csv(res_blade_DEG, "./05_22_2024_manuscript_data/res_blade_DEG.csv")
+write.csv(res_coleoptile_DEG, "./05_22_2024_manuscript_data/res_coleoptile_DEG.csv")
+write.csv(res_radicle_DEG, "./05_22_2024_manuscript_data/res_radicle_DEG.csv")
+write.csv(res_root_DEG, "./05_22_2024_manuscript_data/res_root_DEG.csv")
+
+```
+
+
+
+## positional variation analysis {.tabset}
+
+
+### dat {.tabset}
+
+```{r}
+df_res_ear
+
+test=read_delim("./PromoterPosV_files/ABI19_PromoterPosV_greaterThan500bp.txt",show_col_types = FALSE)
+test
+df_res_ear %>% dplyr::filter(row.names(df_res_ear) %in% test$geneId)
+```
+
+there is a loss of genes from posV files because they aren't expressed in our res ear df. 
+
+
+
+```{r}
+directory= "./PromoterPosV_files"
+
+files = list.files(directory, full.names = TRUE)
+length(files) 
+
+dataframes = lapply(files, function(file) {
+  df=read_delim(file,show_col_types = FALSE)
+  df$filename = file
+  return(df)
+})
+
+posv_dat=bind_rows(dataframes)
+posv_dat$TF_name= gsub("./PromoterPosV_files/|_PromoterPosV_greaterThan500bp.txt|_PromoterPosV_lessThan500bp.txt|_promoterPosV_moreThan500bp.txt|_promoterPosV_lessThan500bp.txt","",posv_dat$filename)
+unique(posv_dat$TF_name)
+posv_dat$FileType= gsub(".*?(greaterThan500bp|lessThan500bp|moreThan500bp).*", "\\1", posv_dat$filename)
+unique(posv_dat$FileType)
+posv_dat=posv_dat %>% mutate(bp_pos=case_when(
+  FileType == "moreThan500bp" ~ "greaterThan500bp", 
+  FileType == "greaterThan500bp" ~ "greaterThan500bp", 
+  FileType == "lessThan500bp" ~ "lessThan500bp"
+))
+unique(posv_dat$bp_pos)
+posv_dat$FileType= posv_dat$bp_pos
+unique(posv_dat$FileType)
+
+######## removing genes that were present in greaterThan500 file and lessThan500 file for the same TF.
+posv_dat=posv_dat %>%
+    group_by(geneId) %>%
+    filter(n_distinct(FileType) == 1) 
+
+```
+
+
+
+
+```{r}
+list(df_res_blade)
+
+
+tissue_expr_list= list(
+  df_res_ear,
+     df_res_meristem,
+     df_res_tassel,
+     df_res_embryo,
+     df_res_seedling, 
+     df_res_blade,
+     df_res_coleoptile,
+     df_res_radicle,
+     df_res_root)
+
+names(tissue_expr_list)= c("ear", "meristem", "tassel", "embryo", "seedling", "blade", "coleoptile","radicle","root" )
+
+for (i in 1:length(tissue_expr_list)){
+  tissue_expr_list[[i]]$geneId=row.names(tissue_expr_list[[i]])
+}
+
+
+
+
+merged_dfs= list()
+for (i in 1:length(tissue_expr_list)){
+  merged_dfs[[i]]= merge(posv_dat %>% dplyr::select(geneId, FileType, TF_name),tissue_expr_list[[i]], by="geneId")
+  merged_dfs[[i]]$tissue= names(tissue_expr_list)[[i]]
+}
+
+posv_fc_dat=bind_rows(merged_dfs)
+head(posv_fc_dat)
+
+posv_fc_dat %>% 
+  dplyr::group_by(tissue, FileType) %>%
+  dplyr::summarise(mean=mean(log2FoldChange))
+
+posv_fc_dat %>% 
+  dplyr::group_by(tissue, TF_name,FileType) %>%
+  dplyr::summarise(mean=mean(log2FoldChange), sd= sd(log2FoldChange))
+
+```
+
+
+### log2fc bar chart {.tabset}
+
+```{r, fig.width=14}
+unique(posv_fc_dat$tissue)
+
+library(ggpubr)
+
+
+pdf("testing_posv.pdf", height=10, width=8)
+
+for (i in 1: length(unique(posv_fc_dat$tissue))){
+  print(ggviolin(posv_fc_dat %>% dplyr::filter(tissue==unique(posv_fc_dat$tissue)[i] ), 
+          x="TF_name", y="log2FoldChange", color = "FileType",
+ palette = c("#00AFBB", "#E7B800"),
+ orientation = "horiz",
+ title=as.character(unique(posv_fc_dat$tissue)[i])))
+  
+}
+
+dev.off()
+
+
+
+```
+
+
+
+### adding DEGs {.tabset}
+
+```{r}
+#DEG cut offs were:  dplyr::filter(padj < 0.05 & abs(log2FoldChange)> 2)
+
+posv_fc_dat=posv_fc_dat %>% 
+  mutate(regulation = case_when(
+  padj <  0.05 & log2FoldChange> 2 ~ "up",
+  padj < 0.05 & log2FoldChange < -2 ~ "down", 
+  TRUE ~ "not_sig"
+  ))
+  
+
+posv_fc_dat=posv_fc_dat %>% 
+  mutate(DEG = case_when(
+  padj <  0.05 & abs(log2FoldChange)> 2 ~ "yes",
+  TRUE ~ "no"
+  ))
+
+posv_fc_dat %>% 
+  dplyr::filter(regulation!= "not_sig") %>%
+  dplyr::group_by(TF_name, FileType, regulation ) %>% 
+  dplyr::summarise(n=n())
+
+write.csv(posv_fc_dat, "./05_22_2024_manuscript_data/positional_var_fc_dat.csv")
+
+write.csv(posv_fc_dat %>% 
+  dplyr::filter(regulation!= "not_sig") %>%
+  dplyr::group_by(TF_name, FileType, regulation ) %>% 
+  dplyr::summarise(n=n()),"./05_22_2024_manuscript_data/positional_var_deg_summary.csv")
+```
+
+
+
+
+### DEG barchart and heatmap {.tabset}
+
+
+```{r}
+tfs_27=(posv_fc_dat%>% dplyr::distinct(TF_name))$TF_name
+nine_tissues=(posv_fc_dat%>% dplyr::distinct(tissue))$tissue
+
+barchart_funct= function (tissue_type){
+  greater_500_percentages=c()
+  for (i in 1:length(tfs_27)){
+  greater_500_percentages[i]= nrow(posv_fc_dat %>% dplyr::filter(FileType=="greaterThan500bp") %>% dplyr::filter(tissue==as.character(tissue_type)) %>% dplyr::filter(TF_name==tfs_27[i]) %>% dplyr::filter(DEG=="yes"))/nrow(posv_fc_dat %>% dplyr::filter(FileType=="greaterThan500bp")%>% dplyr::filter(tissue==as.character(tissue_type)) %>% dplyr::filter(TF_name==tfs_27[i]))}
+  greater_500_percentages=as.data.frame(greater_500_percentages)
+  greater_500_percentages$tf_names=tfs_27
+  return(greater_500_percentages)}
+
+greater_500_res=lapply(nine_tissues, barchart_funct)
+names(greater_500_res)=nine_tissues
+
+for (i in 1:length(nine_tissues)){
+  greater_500_res[[i]]$tissue= nine_tissues[i]
+}
+
+greater_500_res=bind_rows(greater_500_res)
+greater_500_res$position= c("more_than_500bp")
+colnames(greater_500_res)[1]="percentages"
+
+barchart_funct= function (tissue_type){
+  less_500_percentages=c()
+  for (i in 1:length(tfs_27)){
+  less_500_percentages[i]= nrow(posv_fc_dat %>% dplyr::filter(FileType=="lessThan500bp") %>% dplyr::filter(tissue==as.character(tissue_type)) %>% dplyr::filter(TF_name==tfs_27[i]) %>% dplyr::filter(DEG=="yes"))/nrow(posv_fc_dat %>% dplyr::filter(FileType=="lessThan500bp")%>% dplyr::filter(tissue==as.character(tissue_type)) %>% dplyr::filter(TF_name==tfs_27[i]))}
+  less_500_percentages=as.data.frame(less_500_percentages)
+  less_500_percentages$tf_names=tfs_27
+  return(less_500_percentages)}
+
+less_500_res=lapply(nine_tissues, barchart_funct)
+names(less_500_res)=nine_tissues
+
+for (i in 1:length(nine_tissues)){
+  less_500_res[[i]]$tissue= nine_tissues[i]
+}
+
+less_500_res=bind_rows(less_500_res)
+less_500_res$position= c("less_than_500bp")
+colnames(less_500_res)[1]="percentages"
+
+
+all_percentages=bind_rows(greater_500_res, less_500_res)
+all_percentages
+
+
+
+pdf("barcharts_for_carol.pdf", width=12)
+for (i in 1:length(nine_tissues)){
+  print(ggplot(data=all_percentages %>% dplyr::filter(tissue==nine_tissues[i]), aes(fill=position, y=percentages, x=tf_names)) + 
+    geom_bar(position="dodge", stat="identity")+theme(axis.text.x=element_text(size=9, angle=45))+
+       xlab("TFs") + ylab("% of genes that are DE")+ ggtitle(nine_tissues[i]))
+
+}
+dev.off()
+
+######## sanity check of Carol's pdf -- percentages: 
+
+all_percentages %>% dplyr::filter(position == "more_than_500bp") %>% dplyr::filter(tf_names=="NAC25") %>% dplyr::filter(tissue=="embryo") #.5
+all_percentages %>% dplyr::filter(position == "more_than_500bp") %>% dplyr::filter(tf_names=="BAFL12") %>% dplyr::filter(tissue=="meristem") #0.1038961
+all_percentages %>% dplyr::filter(position == "less_than_500bp") %>% dplyr::filter(tf_names=="SBP30_rep1") %>% dplyr::filter(tissue=="tassel") #0.09141121
+all_percentages %>% dplyr::filter(position == "less_than_500bp") %>% dplyr::filter(tf_names=="ABI8") %>% dplyr::filter(tissue=="blade") #0	
+all_percentages %>% dplyr::filter(position == "less_than_500bp") %>% dplyr::filter(tf_names=="EREB183") %>% dplyr::filter(tissue=="blade") #0.0003627131	
+all_percentages %>% dplyr::filter(position == "more_than_500bp") %>% dplyr::filter(tf_names=="EREB183") %>% dplyr::filter(tissue=="blade") #0.01724138
+all_percentages %>% dplyr::filter(position == "more_than_500bp") %>% dplyr::filter(tf_names=="ABI8") %>% dplyr::filter(tissue=="tassel") #0.25
+
+####### looks good
+
+
+```
+
+
+
+
+
+
+
+```{r, fig.width=15}
+posv_fc_dat %>% 
+  dplyr::group_by(TF_name, FileType, DEG ) %>% 
+  dplyr::summarise(n=n())
+
+
+######### barchart
+#pdf("deg_barchart.pdf", width=14)
+ggplot(data=posv_fc_dat %>% 
+  dplyr::filter(DEG=="yes") %>%
+  dplyr::group_by(TF_name, FileType) %>% 
+  dplyr::summarise(n=n()), aes(fill=FileType, y=n, x=TF_name)) + 
+    geom_bar(position="dodge", stat="identity")+theme(axis.text.x=element_text(size=8))
+#dev.off()
+
+
+######### heatmap
+
+hm_df1=posv_fc_dat %>% 
+  dplyr::filter(DEG=="yes") %>%
+  dplyr::group_by(FileType, tissue,TF_name) %>% 
+  dplyr::summarise(n=n())
+
+
+hm_df1 =cbind(hm_df1, hm_col = apply(hm_df1 %>% dplyr::select(FileType, tissue), 1, paste0, collapse = "-"))
+quantile(hm_df1$n)
+quantile(hm_df1$n, probs = c(.33,.66,.99))
+
+
+hm_wide=as.data.frame(hm_df1)
+
+hm_wide=as.data.frame(hm_wide %>%
+  dplyr::select(TF_name, n, hm_col) %>%
+  pivot_wider(names_from= hm_col, values_from = n))
+
+
+row.names(hm_wide)=hm_wide$TF_name
+hm_wide=hm_wide %>% dplyr::select(- TF_name)
+
+head(hm_wide)
+
+Heatmap(as.matrix(hm_wide),
+        col=brewer.pal(n=8 , name = "YlOrRd"))
+
+
+Heatmap(as.matrix(hm_wide),
+         col=colorRamp2(c(quantile(hm_df1$n, probs= c(0,.25,.50,.75,.99))), c("#FFFFCC" ,  "#FED976", "#FEB24C", "#FC4E2A","#B10026" )))
+
+
+
+pdf("deg_heatmap.pdf")
+Heatmap(as.matrix(hm_wide),
+        col=brewer.pal(n=8 , name = "YlOrRd"))
+dev.off()
+
+pdf("deg_heatmap2.pdf")
+Heatmap(as.matrix(hm_wide),
+         col=colorRamp2(c(quantile(hm_df1$n, probs= c(0,.25,.50,.75,.99))), c("#FFFFCC" ,  "#FED976", "#FEB24C", "#FC4E2A","#B10026" )))
+dev.off()
+
+```
+
+
+
+### DEG fisher's test {.tabset}
+
+Looking only at TF targets that have moved (either > or < 500 bp), which ones are DEGs? Is >500 bp shift associated with an enrichment of DEGs? 
+
+
+```{r, fig.height=6}
+posv_fc_dat %>% dplyr::distinct(TF_name) #27 tfs 
+posv_fc_dat %>% dplyr::distinct(tissue) # 9 tissues. 
+
+nine_tissues=(posv_fc_dat %>% dplyr::distinct(tissue))$tissue
+twentyseven_tfs=(posv_fc_dat %>% dplyr::distinct(TF_name))$TF_name
+
+raw_fisher_p_funct= function (tf){
+  raw_p= c()
+for (i in 1:length(nine_tissues)){
+  entire_df=posv_fc_dat %>% 
+    dplyr::filter(TF_name==as.character(tf)) %>% 
+    dplyr::filter(tissue==as.character(nine_tissues[i])) #universe
+  DEG= (posv_fc_dat %>% 
+    dplyr::filter(TF_name==as.character(tf)) %>% 
+    dplyr::filter(tissue==as.character(nine_tissues[i])) %>% dplyr::filter(DEG=="yes"))$geneId
+  greater_than_500= (posv_fc_dat %>% 
+    dplyr::filter(TF_name==as.character(tf)) %>% 
+    dplyr::filter(tissue==as.character(nine_tissues[i])) %>% dplyr::filter(FileType=="greaterThan500bp"))$geneId
+  dat = data.frame(
+  "deg_yes" = c(length(intersect(greater_than_500, DEG)), 
+                length(DEG)-length(intersect(greater_than_500,DEG))),
+  "deg_no" = c(length(greater_than_500)-length(intersect(greater_than_500, DEG)),
+               nrow(entire_df)-length(union(greater_than_500,DEG))),
+  row.names = c("greater_500_yes", "greater_500_no"),
+  stringsAsFactors = FALSE)
+  raw_p[i]= fisher.test(dat, alternative="greater")$p.value}
+  raw_p=as.data.frame(raw_p)
+  raw_p$tissue= nine_tissues
+    return(raw_p)}
+
+
+raw_p_fish= lapply(twentyseven_tfs, raw_fisher_p_funct)
+
+for (i in 1:length(twentyseven_tfs)){
+  raw_p_fish[[i]]$tf_name=twentyseven_tfs[i]
+}
+
+fish_long=bind_rows(raw_p_fish)
+fish_long$fdr_p= p.adjust(fish_long$raw_p, "fdr")
+fish_long
+
+posv_fc_dat %>% dplyr::filter(TF_name=="NAC28") %>% dplyr::filter(DEG=="yes") %>% dplyr::distinct(FileType) ## this is why NAC28 targets all have fisher p = 1. because no DEGs are more than 500 bp. 
+
+
+fish_long
+
+hm_fdr_fish= fish_long %>% dplyr::select(fdr_p, tf_name, tissue)
+hm_fdr_fish=as.data.frame(hm_fdr_fish %>% pivot_wider(names_from = tissue, values_from = fdr_p))
+row.names(hm_fdr_fish)= hm_fdr_fish$tf_name
+hm_fdr_fish= hm_fdr_fish %>% dplyr::select(- tf_name)
+
+
+Heatmap(as.matrix(-log10(hm_fdr_fish)),
+        col=brewer.pal(n=8 , name = "YlOrRd"), 
+        name= "-log10 fdr p",
+        column_title = "fisher's test of enrichment of DEGs in greaterthan500bp targets")
+
+
+######## sanity check of Carol's pdf -- fdr adj fisher p vals: 
+
+fish_long %>% dplyr::filter(tf_name=="EREB183") %>% dplyr::filter(tissue=="blade") #0.0833468	
+fish_long %>% dplyr::filter(tf_name=="NAC91") %>% dplyr::filter(tissue=="blade") #1
+fish_long %>% dplyr::filter(tf_name=="BAFL12") %>% dplyr::filter(tissue=="coleoptile") # 0.003552659	
+fish_long %>% dplyr::filter(tf_name=="BAFL12") %>% dplyr::filter(tissue=="root") #7.818008e-06	
+fish_long %>% dplyr::filter(tf_name=="NAC25") %>% dplyr::filter(tissue=="embryo") #0.08958517	
+
+## looks good
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+**making a table for carol**
+
+
+
+```{r}
+
+posv_fc_dat %>% dplyr::distinct(TF_name) #27 tfs 
+posv_fc_dat %>% dplyr::distinct(tissue) # 9 tissues. 
+
+nine_tissues=(posv_fc_dat %>% dplyr::distinct(tissue))$tissue
+twentyseven_tfs=(posv_fc_dat %>% dplyr::distinct(TF_name))$TF_name
+
+making_fisher_table_funct= function (tf){
+  raw_p= c()
+  odds_ratio= c()
+  contingency_values= list()
+for (i in 1:length(nine_tissues)){
+  entire_df=posv_fc_dat %>% 
+    dplyr::filter(TF_name==as.character(tf)) %>% 
+    dplyr::filter(tissue==as.character(nine_tissues[i])) #universe
+  DEG= (posv_fc_dat %>% 
+    dplyr::filter(TF_name==as.character(tf)) %>% 
+    dplyr::filter(tissue==as.character(nine_tissues[i])) %>% dplyr::filter(DEG=="yes"))$geneId
+  greater_than_500= (posv_fc_dat %>% 
+    dplyr::filter(TF_name==as.character(tf)) %>% 
+    dplyr::filter(tissue==as.character(nine_tissues[i])) %>% dplyr::filter(FileType=="greaterThan500bp"))$geneId
+  dat = data.frame(
+  "deg_yes" = c(length(intersect(greater_than_500, DEG)), 
+                length(DEG)-length(intersect(greater_than_500,DEG))),
+  "deg_no" = c(length(greater_than_500)-length(intersect(greater_than_500, DEG)),
+               nrow(entire_df)-length(union(greater_than_500,DEG))),
+  row.names = c("greater_500_yes", "greater_500_no"),
+  stringsAsFactors = FALSE)
+  
+  raw_p[i]= fisher.test(dat, alternative="greater")$p.value
+  odds_ratio[i]= fisher.test(dat, alternative="greater")$estimate
+  contingency_values[[i]]= c("deg_yes_and_greater500_yes"=length(intersect(greater_than_500, DEG)),
+                                "deg_yes_and_greater500_no"=length(DEG)-length(intersect(greater_than_500,DEG)),
+                                "deg_no_and_greater500_yes"=length(greater_than_500)-length(intersect(greater_than_500, DEG)),
+                                "deg_no_and_greater500_no"= nrow(entire_df)-length(union(greater_than_500,DEG)))
+  }
+  carol_df=as.data.frame(raw_p)
+  carol_df$tissue= nine_tissues
+  carol_df$odds_ratio= odds_ratio
+  wide_contingency_values=bind_rows(contingency_values)
+  res=bind_cols(carol_df,wide_contingency_values )
+    return(res)}
+
+entire_fisher_table=lapply(twentyseven_tfs, making_fisher_table_funct)
+
+
+for (i in 1:length(twentyseven_tfs)){
+  entire_fisher_table[[i]]$tf_name=twentyseven_tfs[i]
+}
+
+bind_rows(entire_fisher_table)
+
+write.csv(bind_rows(entire_fisher_table),"05_24_2024_df_for_carol.csv")
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+## fisher's test prep {.tabset}
+
+### Fetching DAP data {.tabset}
+
+made a symlink for
+/scratch/ch153/projects/dap_zm_crm/raw/B73-shared_B73-specific_ChIPseeker_files_annotated
+in my directory.
+
+```{r}
+
+# Get a list of all .xlsx files in the directory
+xlsx_files =list.files("./B73-shared_B73-specific_ChIPseeker_files_annotated", pattern = "\\.xlsx$", full.names = TRUE)
+
+
+# Initialize an empty list to store dataframes
+all_dataframes <- list()
+
+# Loop through each .xlsx file and read it into a dataframe
+for (file in xlsx_files) {
+  df <- read_excel(file)
+  all_dataframes[[file]] <- df
+}
+
+
+testing_names=c()  
+for (i in 1:133){
+  testing_names[i]=gsub("./B73-shared_B73-specific_ChIPseeker_files_annotated/Chipseeker_|_bamNorm_10kb1bp.xlsx", "",xlsx_files[i])
+}
+
+
+head(testing_names)
+
+names(all_dataframes)=testing_names
+
+head(all_dataframes[["ABI19_B73-shared"]][["geneId"]])
+
+#SAME AS: 
+head(all_dataframes[[1]][["geneId"]])
+names(all_dataframes)[1]
+
+## why are there 133? shouldn't it be an even number??
+
+testing_something= gsub("-shared|-specific", "",names(all_dataframes))
+# BZIP86_rep1_B73 is the outlier. this TF has 3 files: shared, specific, and rep1 shared.
+
+```
+
+
+
+```{r}
+library(purrr)
+
+merged_DAP_target_list= map2_dfr(all_dataframes, names(all_dataframes), ~ mutate(.x, source = .y))
+merged_DAP_target_list=merged_DAP_target_list %>% dplyr::select(- 30)
+colnames(merged_DAP_target_list)
+merged_DAP_target_list=merged_DAP_target_list %>%dplyr::relocate(source,.before = "seqnames")
+head(merged_DAP_target_list)
+write.csv(merged_DAP_target_list, "./05_22_2024_manuscript_data/merged_DAP_target_list.csv")
+```
+
+
+
+
+### Filtering DAP data {.tabset}
+
+* Filter 1 is dplyr::filter(annotation!="Distal Intergenic")\
+* Filter 2 is dplyr::filter(distanceToTSS\> -10000 & distanceToTSS\<
+300)\
+* Filter 3 is dplyr::filter(distanceToTSS\> -2000 & distanceToTSS\<
+300)\
+* Filter 4 is distanceToTSS> -10000 & distanceToTSS< 0 OR 
+start and end of the gene overlap with the start and end of 5' UTR
+
+
+
+
+```{r}
+
+colnames(all_dataframes[["ABI19_B73-shared"]])
+testing_df= all_dataframes[["ABI19_B73-shared"]]
+
+testing_df
+
+
+#filter 1: 
+testing_df %>% dplyr::filter(annotation!="Distal Intergenic")
+
+#filter 2: 
+testing_df %>% dplyr::filter(distanceToTSS> -10000 & distanceToTSS< 300)
+
+#filter 3: 
+testing_df %>% dplyr::filter(distanceToTSS> -2000 & distanceToTSS< 300)
+
+
+```
+
+### testing out fisher's tests with different filters {.tabset}
+
+no filter
+
+```{r}
+names(all_dataframes)[1]
+DEG=row.names(res_ear_DEG)
+entire_df=df_res_ear
+DAP = intersect(all_dataframes[[1]][["geneId"]],row.names(entire_df))
+dat = data.frame(
+  "deg_yes" = c(length(intersect(DAP, DEG)), 
+                length(DEG)-length(intersect(DAP,DEG))),
+  "deg_no" = c(length(DAP)-length(intersect(DAP, DEG)),
+               nrow(entire_df)-length(union(DAP,DEG))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+dat
+fisher.test(dat, alternative="greater")
+
+nrow(entire_df)
+```
+
+
+filter 1
+
+```{r}
+
+DEG=row.names(res_ear_DEG)
+entire_df=df_res_ear
+DAP_df_filter1= all_dataframes[[1]] %>% dplyr::filter(annotation!="Distal Intergenic")
+DAP = intersect(DAP_df_filter1[["geneId"]],row.names(entire_df))
+dat = data.frame(
+  "deg_yes" = c(length(intersect(DAP, DEG)), 
+                length(DEG)-length(intersect(DAP,DEG))),
+  "deg_no" = c(length(DAP)-length(intersect(DAP, DEG)),
+               nrow(entire_df)-length(union(DAP,DEG))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+dat
+fisher.test(dat, alternative="greater")
+
+
+
+```
+
+filter 2
+
+```{r}
+
+DEG=row.names(res_ear_DEG)
+entire_df=df_res_ear
+DAP_df_filter2= all_dataframes[[1]] %>% dplyr::filter(distanceToTSS> -10000 & distanceToTSS< 300)
+DAP = intersect(DAP_df_filter2[["geneId"]],row.names(entire_df))
+dat = data.frame(
+  "deg_yes" = c(length(intersect(DAP, DEG)), 
+                length(DEG)-length(intersect(DAP,DEG))),
+  "deg_no" = c(length(DAP)-length(intersect(DAP, DEG)),
+               nrow(entire_df)-length(union(DAP,DEG))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+dat
+fisher.test(dat, alternative="greater")
+
+
+
+```
+
+filter 3
+
+```{r}
+
+DEG=row.names(res_ear_DEG)
+entire_df=df_res_ear
+DAP_df_filter3= all_dataframes[[1]] %>% dplyr::filter(distanceToTSS> -2000 & distanceToTSS< 300)
+DAP = intersect(DAP_df_filter3[["geneId"]],row.names(entire_df))
+dat = data.frame(
+  "deg_yes" = c(length(intersect(DAP, DEG)), 
+                length(DEG)-length(intersect(DAP,DEG))),
+  "deg_no" = c(length(DAP)-length(intersect(DAP, DEG)),
+               nrow(entire_df)-length(union(DAP,DEG))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+dat
+fisher.test(dat, alternative="greater")
+
+```
+
+## fisher's test function {.tabset}
+
+### filter 2 {.tabset}
+
+
+```{r}
+FDR_fisher_funct_filter2= function (res_cond_DEG, df_res_cond){
+p_val=c()
+DAP=list()
+DAP_df_filter2=list()
+for (i in 1:length(all_dataframes)){
+  DEG=row.names(res_cond_DEG)
+  entire_df=df_res_cond
+  DAP_df_filter2[[i]]= all_dataframes[[i]] %>% dplyr::filter(distanceToTSS> -10000 & distanceToTSS< 300)
+  DAP[[i]] = intersect(DAP_df_filter2[[i]][["geneId"]],row.names(entire_df))
+  dat = data.frame(
+  "deg_yes" = c(length(intersect(DAP[[i]], DEG)), 
+                length(DEG)-length(intersect(DAP[[i]],DEG))),
+  "deg_no" = c(length(DAP[[i]])-length(intersect(DAP[[i]], DEG)),
+               nrow(entire_df)-length(union(DAP[[i]],DEG))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+  test=fisher.test(dat, alternative="greater")
+  p_val[i]=test$p.value
+}
+names(p_val)=names(all_dataframes)
+return(p_val) }
+
+FDR_part_funct= function(){
+  raw_fisher_p_df=
+  bind_rows(FDR_fisher_funct_filter2(res_meristem_DEG, df_res_meristem),
+          FDR_fisher_funct_filter2(res_embryo_DEG, df_res_embryo),
+          FDR_fisher_funct_filter2(res_seedling_DEG, df_res_seedling),
+          FDR_fisher_funct_filter2(res_tassel_DEG, df_res_tassel),
+          FDR_fisher_funct_filter2(res_ear_DEG, df_res_ear), 
+          FDR_fisher_funct_filter2(res_blade_DEG, df_res_blade),
+          FDR_fisher_funct_filter2(res_coleoptile_DEG, df_res_coleoptile),
+          FDR_fisher_funct_filter2(res_radicle_DEG, df_res_radicle),
+          FDR_fisher_funct_filter2(res_root_DEG, df_res_root))
+  raw_fisher_p_df=as.data.frame(raw_fisher_p_df)
+  row.names(raw_fisher_p_df)=c("meristem", "embryo","seedling","tassel","ear","blade","coleoptile","radicle","root")
+  raw_fisher_p_df$conditions= c("meristem", "embryo","seedling","tassel","ear","blade","coleoptile","radicle","root")
+  raw_fisher_p_df_longer=pivot_longer(raw_fisher_p_df, cols= -conditions , names_to= "TFs", values_to="raw_p")
+  raw_fisher_p_df_longer$FDR_p= p.adjust(raw_fisher_p_df_longer$raw_p, method="fdr")
+  FDR_fisher_p_df=as.data.frame(raw_fisher_p_df_longer %>% dplyr::select(- raw_p) %>% pivot_wider(names_from = "TFs", values_from = "FDR_p"))
+  row.names(FDR_fisher_p_df)= FDR_fisher_p_df$conditions
+  FDR_fisher_p_df=FDR_fisher_p_df %>% dplyr::select(- conditions)
+  FDR_fisher_p_df=as.data.frame(t(FDR_fisher_p_df))
+  return(FDR_fisher_p_df)
+}
+
+FDR_fisher_p_df_long_filter2= FDR_part_funct()
+
+
+
+```
+
+
+
+## heatmaps {.tabset}
+
+
+
+### all DAP {.tabset}
+
+```{r, fig.height=7, fig.width=7}
+
+heatmap_funct1= function(df_long,added_text){
+  df_long$TFs=row.names(df_long)
+  df_long=df_long %>% dplyr::mutate(TF_specificity=case_when(
+  grepl("specific",TFs) == TRUE ~ "B73-specific",
+  grepl("shared",TFs) == TRUE ~ "shared"
+))
+  df_long=df_long %>% dplyr::select( - TFs)
+  row_annot= HeatmapAnnotation(specificity= df_long$TF_specificity, 
+                             col=list(specificity=c("B73-specific"= "deeppink2", "shared"="navy")) , 
+                             which= "row",
+                             width = unit(0.5, "cm"),
+                           annotation_width =unit(0.5, "cm"),
+                             annotation_name_gp= gpar(fontsize = 6),
+                            annotation_legend_param= list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')))
+  h1=Heatmap(as.matrix(-log10(df_long%>%dplyr::select(- TF_specificity))), 
+            cluster_columns = T,  cluster_rows = T,
+            #col=colorRamp2(c(0,4,8), c("khaki1", "orange", "red1")),
+            col=brewer.pal(n=9 , name = "YlOrRd"), 
+            rect_gp = gpar(col = "grey90", lwd = 0.5),
+                              column_title_gp=gpar(fontsize=6),
+                              row_names_gp=gpar(fontsize=4),
+                              column_names_gp=gpar(fontsize=6),
+                              row_dend_width=unit(0.2,'in'),
+                              column_dend_height=unit(0.2,'in'),
+                              heatmap_legend_param=list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')),
+           column_title = paste0("Fisher's exact test FDR adjusted p values\n",as.character(added_text)),
+            row_labels=row.names(df_long), name="- log10 FDR p",
+        left_annotation=row_annot)
+return(h1)
+}
+
+
+heatmap_funct1(FDR_fisher_p_df_long_filter2, "Enrichment between DEGs and DAP-seq TF binding sites")
+
+```
+
+
+
+
+```{r}
+pdf("./05_22_2024_manuscript_figures/05_22_2024_all_133_TFs_heatmap_OG_COLORS.pdf", width=2.6, height=7)
+heatmap_funct1(FDR_fisher_p_df_long_filter2, "DEG enrichment in DAP-seq TF targets")
+dev.off()
+```
+
+
+
+
+
+
+
+```{r}
+library(viridis)
+#Try "shared"="#FFFFCD" (instead of "navy"), and "B73-specific"="#E49EB3" (instead of "deeppink2")
+
+heatmap_funct_new= function(df_long,added_text){
+  df_long$TFs=row.names(df_long)
+  df_long=df_long %>% dplyr::mutate(TF_specificity=case_when(
+  grepl("specific",TFs) == TRUE ~ "B73-specific",
+  grepl("shared",TFs) == TRUE ~ "shared"
+))
+  df_long=df_long %>% dplyr::select( - TFs)
+  
+  row_annot= rowAnnotation(specificity= df_long$TF_specificity, 
+                             col=list(specificity=c("B73-specific"= "#E49EB3", "shared"="#FFFFCD" )) , 
+                             width = unit(0.5, "cm"),
+                           annotation_width =unit(0.5, "cm"),
+                             annotation_name_gp= gpar(fontsize = 6),
+                            annotation_legend_param= list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')))
+  h1_df= -log10(df_long%>%dplyr::select(- TF_specificity))
+  h1=Heatmap(as.matrix(h1_df), 
+            cluster_columns = T,  cluster_rows = T,
+            #col=brewer.pal(n=9 , name = "YlOrRd"), 
+            col=rev(viridis(50)),
+           
+                              rect_gp = gpar(col = "grey90", lwd = 0.5),
+                              column_title_gp=gpar(fontsize=6),
+                              row_names_gp=gpar(fontsize=4),
+                              column_names_gp=gpar(fontsize=6),
+                              row_dend_width=unit(0.2,'in'),
+                              column_dend_height=unit(0.2,'in'),
+                              heatmap_legend_param=list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')),
+           column_title = paste0("Fisher's exact test FDR adjusted p values\n",as.character(added_text)),
+            row_labels=row.names(df_long), name="- log10 FDR p",
+        left_annotation=row_annot)
+return(h1)
+}
+
+
+heatmap_funct_new(FDR_fisher_p_df_long_filter2, "DEG enrichment in DAP-seq TF targets")
+
+```
+
+
+
+
+
+
+```{r}
+pdf("./05_22_2024_manuscript_figures/05_22_2024_all_133_TFs_heatmap.pdf", width=2.6, height=7)
+heatmap_funct_new(FDR_fisher_p_df_long_filter2, "DEG enrichment in DAP-seq TF targets")
+dev.off()
+
+
+
+
+write.csv(FDR_fisher_p_df_long_filter2, "./05_22_2024_manuscript_data/DEG_enrichment_in_DAP_seq_TF_targets_FDR_fisher_p_df_filter2.csv")
+
+```
+
+
+
+
+
+
+
+
+
+
+### subset of DAP {.tabset}
+
+Removing TFs that have an FDR p value \>.05 in ALL conditions.
+
+```{r, fig.height=7, fig.width=7}
+
+
+heatmap_funct2= function(df_long, added_text){
+  filtered_df_long= df_long %>% dplyr::filter(!row.names(df_long) %in% row.names(df_long %>% filter_all(all_vars(. > 0.05))))
+  filtered_df_long$TFs=row.names(filtered_df_long)
+  filtered_df_long=filtered_df_long %>% dplyr::mutate(TF_specificity=case_when(
+  grepl("specific",TFs) == TRUE ~ "B73-specific",
+  grepl("shared",TFs) == TRUE ~ "shared"
+))
+  filtered_df_long=filtered_df_long %>% dplyr::select( - TFs)
+  row_annot= row_annot= rowAnnotation(specificity= filtered_df_long$TF_specificity, 
+                             col=list(specificity=c("B73-specific"= "#E49EB3", "shared"="#FFFFCD" )) , 
+                             width = unit(0.5, "cm"),
+                           annotation_width =unit(0.5, "cm"),
+                             annotation_name_gp= gpar(fontsize = 6),
+                            annotation_legend_param= list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')))
+  h2= Heatmap(as.matrix(-log10(filtered_df_long%>%dplyr::select(- TF_specificity))), 
+            cluster_columns = T,  cluster_rows = T,
+            col=rev(viridis(50)),
+           
+                              rect_gp = gpar(col = "grey90", lwd = 0.5),
+                              column_title_gp=gpar(fontsize=6),
+                              row_names_gp=gpar(fontsize=4),
+                              column_names_gp=gpar(fontsize=6),
+                              row_dend_width=unit(0.2,'in'),
+                              column_dend_height=unit(0.2,'in'),
+                              heatmap_legend_param=list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')),
+           column_title = paste0("Fisher's exact test FDR adjusted p values\nOnly kept TFs where at least one tissue had FDR p<.05\n", as.character(added_text)),
+            row_labels=row.names(filtered_df_long), name="-log10 FDR p",
+        left_annotation=row_annot)
+return(h2)
+}
+
+
+heatmap_funct2(FDR_fisher_p_df_long_filter2, "DEG enrichment in DAP-seq TF targets")
+
+
+pdf("./05_22_2024_manuscript_figures/05_22_2024_subset_of_TFs_heatmap.pdf", width=3.1, height=2.7)
+heatmap_funct2(FDR_fisher_p_df_long_filter2, "DEG enrichment in DAP-seq TF targets")
+dev.off()
+
+
+
+```
+
+
+
+
+## cell type specific genes (Bruno's paper) {.tabset}
+
+<https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10657638/#SD8>
+
+### setting up {.tabset}
+
+
+```{r}
+### total list of genes (Bruno sent this to me):
+
+all_bruno_genes= read.csv("Maize_Gene_list_single_cell_RNAseq_Bruno.csv", row.names = 1)
+all_bruno_genes=all_bruno_genes$x
+head(all_bruno_genes)
+length(unique(all_bruno_genes)) #26557 genes
+
+
+write.csv(all_bruno_genes, "./05_22_2024_manuscript_data/bruno_data_for_supp_figures/Maize_Gene_list_single_cell_RNAseq_Bruno.csv")
+
+```
+
+
+
+"Thus, we could use the well-annotated maize cell type map for rapid
+generation of a high confidence cellular-resolution "pan-transcriptome"
+of these key crop species, including hundreds of new cell type-specific
+marker genes (Supplementary Table 4)."\
+Looking into table 4 which had the cell type-specific marker genes for
+maize.\
+
+
+```{r}
+table_4_sheet1= as.data.frame(read_excel("new_supp_table_4.xlsx", sheet = "markers_maize"))
+row.names(table_4_sheet1)=table_4_sheet1$...1
+table_4_sheet1=table_4_sheet1[,-1]
+head(table_4_sheet1)
+length(unique(table_4_sheet1$gene))
+
+
+table_4=table_4_sheet1 
+head(table_4)
+length(table_4$gene)
+length(unique(table_4$gene))
+
+
+####### finally, I need to make sure that all the table 4 genes are present in the total list of genes: 
+length(intersect(all_bruno_genes, table_4$gene)) 
+
+#removing these 27 from the table 4: 
+setdiff(table_4$gene, all_bruno_genes)
+
+table_4=table_4%>% dplyr::filter(!gene %in% setdiff(table_4$gene, all_bruno_genes))
+
+length(setdiff (all_bruno_genes,table_4$gene))
+length(unique(table_4$gene))
+length(unique(all_bruno_genes))
+
+length(intersect(all_bruno_genes, table_4$gene))
+
+```
+
+
+
+
+
+v4 to v5 conversion was done with: https://ars-usda.app.box.com/v/maizegdb-public/folder/165362280830.  
+
+```{r}
+####### this is maize v4 and i need to convert it to v5
+conv_table=read.table("B73v4_B73v5_liftoff_genemodel_CDS_xref_shortened.txt", header = T)
+
+head(conv_table)
+nrow(conv_table)
+length(unique(conv_table$B73v4_gene_model_ID))
+colnames(conv_table)=c("B73v4_gene_model_ID", "B73v5_gene_model_ID")
+conv_table=conv_table %>% distinct(B73v4_gene_model_ID,B73v5_gene_model_ID, .keep_all = TRUE) ### removing duplicates. keeps only the unique combinations of the two columns.
+
+
+conv_table[duplicated(conv_table$B73v4_gene_model_ID),] ######## bumping into the same issue where one gene id from v4 corresponds to multiple gene ids from v5.
+
+
+write.csv(conv_table, "./05_22_2024_manuscript_data/bruno_data_for_supp_figures/v4_to_v5_maize_genome_conversion_table.csv")
+
+```
+
+
+```{r}
+
+
+conv_table_for_all_bruno_genes= conv_table %>% dplyr::filter(B73v4_gene_model_ID %in% all_bruno_genes)
+head(conv_table_for_all_bruno_genes)
+
+#duplicated gene IDs: 
+conv_table_for_all_bruno_genes[duplicated(conv_table_for_all_bruno_genes$B73v4_gene_model_ID),]
+duplicated_v4_IDs= unique((conv_table_for_all_bruno_genes[duplicated(conv_table_for_all_bruno_genes$B73v4_gene_model_ID),])$B73v4_gene_model_ID)
+
+#removing 735 gene IDs all of bruno's genes. 
+length(duplicated_v4_IDs)
+
+
+conv_table_for_all_bruno_genes=conv_table_for_all_bruno_genes %>% dplyr::filter(!B73v4_gene_model_ID %in% duplicated_v4_IDs)
+#duplicates removed
+
+#### removing all the v4 gene ids that have chr positions in v5
+conv_table_for_all_bruno_genes %>% dplyr::filter(grepl("chr", B73v5_gene_model_ID))  #1,282 genes in v4 that become chromosome locations in v5. 
+conv_table_for_all_bruno_genes=conv_table_for_all_bruno_genes %>% dplyr::filter(!grepl("chr", B73v5_gene_model_ID))
+
+head(conv_table_for_all_bruno_genes)
+
+```
+
+
+### conversions from v4 to v5 {.tabset}
+
+```{r}
+head(conv_table_for_all_bruno_genes)
+
+#the variables need to be called df_table_4_genes_v5 and all_bruno_genes_v5
+
+all_bruno_genes_v5= conv_table_for_all_bruno_genes$B73v5_gene_model_ID
+
+df_table_4_genes_v5=merge(table_4,conv_table_for_all_bruno_genes, by.x = "gene", by.y = "B73v4_gene_model_ID", all = F)
+
+table_4
+df_table_4_genes_v5
+
+length(unique(table_4$gene))
+length(unique(df_table_4_genes_v5$B73v5_gene_model_ID)) #5407
+length(unique(all_bruno_genes_v5)) #23126
+```
+
+
+
+
+Now focusing on the cluster/cell type part: 
+
+
+
+```{r}
+write.csv(df_table_4_genes_v5,"./05_22_2024_manuscript_data/bruno_data_for_supp_figures/cell_type_markers_maize_v5_genome.csv")
+```
+
+
+### fisher's test with cell-type specific marker genes {.tabset}
+
+
+#### test {.tabset}
+
+
+```{r}
+
+
+cell_type_vec= unique(df_table_4_genes_v5$cluster)
+spec_genes= unique((df_table_4_genes_v5 %>% dplyr::filter(cluster=="Trichoblast"))$B73v5_gene_model_ID)
+entire_vec= unique(all_bruno_genes_v5)
+DAP_df_filter2= all_dataframes[["BZIP91_B73-shared"]]  %>% dplyr::filter(distanceToTSS> -10000 & distanceToTSS< 300)
+DAP = intersect(DAP_df_filter2$geneId,entire_vec)
+  dat = data.frame(
+  "spec_genes_yes" = c(length(intersect(DAP, spec_genes)), 
+                length(spec_genes)-length(intersect(DAP,spec_genes))),
+  "spec_genes_no" = c(length(DAP)-length(intersect(DAP, spec_genes)),
+               length(entire_vec)-length(union(DAP,spec_genes))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+  test=fisher.test(dat, alternative="greater")
+dat
+test$p.value
+
+
+```
+
+
+#### filter 2 {.tabset}
+
+```{r}
+
+cell_type_vec= unique(df_table_4_genes_v5$cluster)
+testing_function= function (cell_type){
+p_val=c()
+DAP=list()
+DAP_df_filter2=list()
+for (i in 1:length(all_dataframes)){
+  spec_genes= unique((df_table_4_genes_v5 %>% dplyr::filter(cluster==as.character(cell_type)))$B73v5_gene_model_ID)
+  entire_vec= unique(all_bruno_genes_v5)
+  DAP_df_filter2[[i]]= all_dataframes[[i]]  %>% dplyr::filter(distanceToTSS> -10000 & distanceToTSS< 300)
+  DAP[[i]] = intersect(DAP_df_filter2[[i]][["geneId"]],entire_vec)
+  dat = data.frame(
+  "spec_genes_yes" = c(length(intersect(DAP[[i]], spec_genes)), 
+                length(spec_genes)-length(intersect(DAP[[i]],spec_genes))),
+  "spec_genes_no" = c(length(DAP[[i]])-length(intersect(DAP[[i]], spec_genes)),
+               length(entire_vec)-length(union(DAP[[i]],spec_genes))),
+  row.names = c("DAP_yes", "DAP_no"),
+  stringsAsFactors = FALSE)
+  test=fisher.test(dat, alternative="greater")
+  p_val[i]=test$p.value
+  }
+names(p_val)=names(all_dataframes)
+return(p_val)
+  }
+  
+  
+fisher_res=lapply(cell_type_vec,testing_function)
+names(fisher_res)=cell_type_vec
+raw_fisher_p_df=as.data.frame(do.call(rbind,fisher_res))
+head(raw_fisher_p_df)
+
+FDR_part_funct= function(){
+  raw_fisher_p_df$conditions= row.names(raw_fisher_p_df)
+  raw_fisher_p_df_longer=pivot_longer(raw_fisher_p_df, cols= -conditions , names_to= "TFs", values_to="raw_p")
+  raw_fisher_p_df_longer$FDR_p= p.adjust(raw_fisher_p_df_longer$raw_p, method="fdr")
+  FDR_fisher_p_df=as.data.frame(raw_fisher_p_df_longer %>% dplyr::select(- raw_p) %>% pivot_wider(names_from = "TFs", values_from = "FDR_p"))
+  row.names(FDR_fisher_p_df)= FDR_fisher_p_df$conditions
+  FDR_fisher_p_df=FDR_fisher_p_df %>% dplyr::select(- conditions)
+  FDR_fisher_p_df=as.data.frame(t(FDR_fisher_p_df))
+  return(FDR_fisher_p_df)
+}
+
+bruno_dat_FDR_fisher_p_filter2_long=FDR_part_funct()
+bruno_dat_FDR_fisher_p_filter2_long                                            
+                                                  
+```
+
+
+### heatmap with cell-type specific genes {.tabset}
+
+```{r}
+heatmap_funct3a= function(df_long,added_text){
+  df_long$TFs=row.names(df_long)
+  df_long=df_long %>% dplyr::mutate(TF_specificity=case_when(
+  grepl("specific",TFs) == TRUE ~ "specific",
+  grepl("shared",TFs) == TRUE ~ "shared"
+))
+  df_long=df_long %>% dplyr::select( - TFs)
+  row_annot= HeatmapAnnotation(spec= df_long$TF_specificity, 
+                             col=list(spec=c("specific"= "deeppink2", "shared"="navy")) , 
+                             which= "row",
+                             width = unit(0.5, "cm"),
+                           annotation_width =unit(0.5, "cm"),
+                             annotation_name_gp= gpar(fontsize = 6),
+                            annotation_legend_param= list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')))
+  h1=Heatmap(as.matrix(-log10(df_long%>%dplyr::select(- TF_specificity))), 
+            cluster_columns = T,  cluster_rows = T,
+            #col=colorRamp2(c(0,4,8), c("khaki1", "orange", "red1")),
+            col=brewer.pal(n=8 , name = "YlOrRd"), 
+            rect_gp = gpar(col = "grey90", lwd = 0.5),
+                              column_title_gp=gpar(fontsize=6),
+                              row_names_gp=gpar(fontsize=4),
+                              column_names_gp=gpar(fontsize=5),
+                              row_dend_width=unit(0.2,'in'),
+                              column_dend_height=unit(0.2,'in'),
+                              heatmap_legend_param=list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')),
+           column_title = paste0("- log10 FDR fisher p vals\n",as.character(added_text)),
+            row_labels=row.names(df_long), name="FDR fisher",
+        left_annotation=row_annot)
+return(h1)
+}
+
+heatmap_funct3a(bruno_dat_FDR_fisher_p_filter2_long, "Enrichment between cell type-specific markers and DAP-seq TF binding sites")
+
+
+pdf("./05_22_2024_manuscript_figures/05_22_2024_bruno_dat_all_133_TFs_heatmap_OG_COLORS.pdf", width=3.2, height=7)
+heatmap_funct3a(bruno_dat_FDR_fisher_p_filter2_long, "Enrichment between cell type-specific markers\nand DAP-seq TF binding sites")
+dev.off()
+
+```
+
+
+
+
+```{r,fig.height=9}
+
+heatmap_funct3= function(df_long,added_text){
+  df_long$TFs=row.names(df_long)
+  df_long=df_long %>% dplyr::mutate(TF_specificity=case_when(
+  grepl("specific",TFs) == TRUE ~ "B73-specific",
+  grepl("shared",TFs) == TRUE ~ "shared"
+))
+  df_long=df_long %>% dplyr::select( - TFs)
+  row_annot= rowAnnotation(specificity= df_long$TF_specificity, 
+                             col=list(specificity=c("B73-specific"= "#E49EB3", "shared"="#FFFFCD" )) , 
+                             width = unit(0.5, "cm"),
+                           annotation_width =unit(0.5, "cm"),
+                             annotation_name_gp= gpar(fontsize = 6),
+                            annotation_legend_param= list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')))
+  h1=Heatmap(as.matrix(-log10(df_long%>%dplyr::select(- TF_specificity))), 
+            cluster_columns = T,  cluster_rows = T,
+            col=rev(viridis(50)),
+           
+                              rect_gp = gpar(col = "grey90", lwd = 0.5),
+                              column_title_gp=gpar(fontsize=6),
+                              row_names_gp=gpar(fontsize=4),
+                              column_names_gp=gpar(fontsize=5),
+                              row_dend_width=unit(0.2,'in'),
+                              column_dend_height=unit(0.2,'in'),
+                              heatmap_legend_param=list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')),
+           column_title = paste0("Fisher's exact test FDR adjusted p values\n",as.character(added_text)),
+            row_labels=row.names(df_long), name="-log10 FDR p",
+        left_annotation=row_annot)
+return(h1)
+}
+
+
+heatmap_funct3(bruno_dat_FDR_fisher_p_filter2_long, "Enrichment between cell type-specific markers and DAP-seq TF binding sites")
+
+
+pdf("./05_22_2024_manuscript_figures/05_22_2024_bruno_dat_all_133_TFs_heatmap.pdf", width=3.2, height=7)
+heatmap_funct3(bruno_dat_FDR_fisher_p_filter2_long, "Enrichment between cell type-specific markers\nand DAP-seq TF binding sites")
+dev.off()
+
+write.csv(bruno_dat_FDR_fisher_p_filter2_long,"./05_22_2024_manuscript_data/bruno_data_for_supp_figures/Enrichment_between_celltype_markers_and_DAP_TF_binding_sites_FDR_fisher_p_filter2_long.csv")
+
+
+```
+
+
+
+
+
+```{r}
+
+
+heatmap_funct4= function(df_long, added_text){
+  filtered_df_long= df_long %>% dplyr::filter(!row.names(df_long) %in% row.names(df_long %>% filter_all(all_vars(. > 0.05))))
+  filtered_df_long$TFs=row.names(filtered_df_long)
+  filtered_df_long=filtered_df_long %>% dplyr::mutate(TF_specificity=case_when(
+  grepl("specific",TFs) == TRUE ~ "B73-specific",
+  grepl("shared",TFs) == TRUE ~ "shared"
+))
+  filtered_df_long=filtered_df_long %>% dplyr::select( - TFs)
+  row_annot= rowAnnotation(specificity= filtered_df_long$TF_specificity, 
+                             col=list(specificity=c("B73-specific"= "#E49EB3", "shared"="#FFFFCD" )) , 
+                             width = unit(0.5, "cm"),
+                           annotation_width =unit(0.5, "cm"),
+                             annotation_name_gp= gpar(fontsize = 6),
+                            annotation_legend_param= list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')))
+  h2= Heatmap(as.matrix(-log10(filtered_df_long%>%dplyr::select(- TF_specificity))), 
+            cluster_columns = T,  cluster_rows = T,
+            col=rev(viridis(50)),
+           
+                              rect_gp = gpar(col = "grey90", lwd = 0.5),
+                              column_title_gp=gpar(fontsize=6),
+                              row_names_gp=gpar(fontsize=4),
+                              column_names_gp=gpar(fontsize=5),
+                              row_dend_width=unit(0.2,'in'),
+                              column_dend_height=unit(0.2,'in'),
+                              heatmap_legend_param=list(title_gp=gpar(fontsize=6),
+                                                   labels_gp = gpar(fontsize=6),
+                                                   grid_width=unit(0.1,'in')),
+           column_title = paste0("Fisher's exact test FDR adjusted p values\nOnly kept TFs where at least one cell type had FDR p<.05\n", as.character(added_text)),
+            row_labels=row.names(filtered_df_long), name="-log10 FDR p",
+        left_annotation=row_annot)
+return(h2)
+}
+
+
+heatmap_funct4(bruno_dat_FDR_fisher_p_filter2_long, "Enrichment between cell type-specific markers\nand DAP-seq TF binding sites")
+
+
+
+pdf("./05_22_2024_manuscript_figures/05_22_2024_bruno_dat_subset_of_TFs_heatmap.pdf",width=3.2, height=3)
+heatmap_funct4(bruno_dat_FDR_fisher_p_filter2_long, "Enrichment between cell type-specific markers\nand DAP-seq TF binding sites")
+dev.off()
+
+
+
+```
+
+
+
+```{r}
+sessionInfo()
+
+```
