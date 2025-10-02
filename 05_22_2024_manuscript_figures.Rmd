@@ -39,10 +39,6 @@ library(cowplot)
 
 ## importing rsem data {.tabset}
 
-resources:\
-\*
-<https://bioconductor.org/packages/release/bioc/vignettes/tximport/inst/doc/tximport.html#Introduction>\
-\* <https://github.com/bli25/RSEM_tutorial?tab=readme-ov-file>\
 
 ```{r}
 
@@ -51,90 +47,10 @@ list.files(dir)
 
 getwd()
 
-
 ```
 
 for deg, compare b73 and mo17 lift off.\
-I need to run rsem 5 times for the 5 conditions. and I need to read in
-the correct samples for each condition.
-
-```{r, eval=F}
-getwd()
-SRR_file_version3=read_tsv("SRR_file_version3.tsv")
-SRR_file_version3$fq1=paste0(SRR_file_version3$SRR_ID, "_1.fastq")
-SRR_file_version3$fq2=paste0(SRR_file_version3$SRR_ID, "_2.fastq")
-
-SRR_file_version3=SRR_file_version3 %>% 
-  mutate(ref = case_when(
-    organism == "B73" ~ "B73_genome_B73_liftoff_gff/ref",
-    organism == "Mo17" ~ "Mo17_genome_B73_liftoff_gff/ref"
-  ))
-
-SRR_file_version3$sample_name=paste0(str_extract(SRR_file_version3$ref,"^[^/]+"),"/",SRR_file_version3$SRR_ID,"_paired_end_qual")
-
-
-write_tsv(SRR_file_version3, "SRR_file_version3_for_rsem.tsv")
-SRR_file_version3
-
-```
-
-```{r, eval=F}
-
-SRR_file_version1= read_tsv("SRR_file_names.tsv")
-SRR_file_version2= read_tsv("SRR_file_v2.tsv")
-
-SRR_file_version1=SRR_file_version1[c(6:7),]
-SRR_file_version2
-
-SRR_file_version1
-SRR_file_version2
-SRR_file_version3
-
-SRR_file_final=rbind(rbind(SRR_file_version1,SRR_file_version2),SRR_file_version3)
-
-new_SRR_file=read_tsv("for_rsem_SRR_file_v4.txt")
-
-new_SRR_file
-unique(new_SRR_file$condition)
-
-SRR_file_final=rbind(new_SRR_file,SRR_file_final)
-
-SRR_file_final
-```
-
-
-
-```{r, eval=F}
-SRR_file_final$results=paste0(SRR_file_final$sample_name,".genes.results")
-SRR_file_final
-
-write.csv(SRR_file_final, "./05_22_2024_manuscript_data/SRR_file_final.csv")
-
-
-filing_funct= function (condition_name){
-  test_vec=c((SRR_file_final %>% dplyr::filter(condition == as.character(condition_name)))$results)
-  names(test_vec)= str_extract(test_vec, "SRR\\d+")
-  return(test_vec)
-}
-
-
- 
-
-tassel_files=filing_funct("tassel_v12")
-seedling_files= filing_funct("11_day_seedling_leaf")
-embryo_files = filing_funct("embryo_27DAP")
-meristem_files=filing_funct("11 day meristem")
-ear_files=filing_funct("ear_v14")
-
-blade_files=filing_funct("blade_v12")
-coleoptile_files=filing_funct("coleoptile_tip")
-radicle_files= filing_funct("radicle_root")
-root_files= filing_funct("root_0DAP")
-
-```
-
-
-
+I needed to run rsem 5 times for the 5 conditions.
 
 
 ## testing for consistency between gene ids: {.tabset}
@@ -169,18 +85,6 @@ read.table("B73_genome_B73_liftoff_gff/SRR7548306_paired_end_qual.genes.results"
 
 ```{r, eval=F}
 
-
-txi_ear = tximport(ear_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_tassel = tximport(tassel_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_seedling = tximport(seedling_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_embryo = tximport(embryo_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_meristem = tximport(meristem_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-
-txi_blade = tximport(blade_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_coleoptile = tximport(coleoptile_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_radicle = tximport(radicle_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-txi_root = tximport(root_files, type = "rsem", txIn = FALSE, txOut = FALSE)
-
 txi_ear$length[txi_ear$length == 0] = 1
 txi_tassel$length[txi_tassel$length == 0] = 1
 txi_seedling$length[txi_seedling$length == 0] = 1
@@ -201,67 +105,6 @@ txi_list=list(txi_ear,
      txi_coleoptile,
      txi_radicle,
      txi_root)
-
-
-```
-
-
-
-
-Abundance dataframes for Mary: 
-
-```{r, eval=F}
-
-test=tximport(ear_files, type = "rsem", txIn = FALSE, txOut = FALSE, abundanceCol = TPM)
-head(txi_ear$abundance)
-head(test$abundance)
-### so the abundance columns in our txi objects are in TPM. 
-
-
-txi_ear_abund=as.data.frame(txi_ear$abundance)
-txi_tassel_abund=as.data.frame(txi_tassel$abundance)
-txi_seedling_abund=as.data.frame(txi_seedling$abundance)
-txi_embryo_abund=as.data.frame(txi_embryo$abundance)
-txi_meristem_abund=as.data.frame(txi_meristem$abundance)
-
-txi_blade_abund=as.data.frame(txi_blade$abundance)
-txi_coleoptile_abund=as.data.frame(txi_coleoptile$abundance)
-txi_radicle_abund=as.data.frame(txi_radicle$abundance)
-txi_root_abund=as.data.frame(txi_root$abundance)
-
-organizing_funct= function (txi_abund){
-  test= SRR_file_final %>% dplyr::filter(SRR_ID %in% colnames(txi_abund))
-  colnames(txi_abund)=  paste0(test$SRR_ID,sep="_",test$organism)
-  return(txi_abund)
-}
-
-
-txi_ear_abund=organizing_funct(txi_ear_abund)
-txi_tassel_abund=organizing_funct(txi_tassel_abund)
-txi_seedling_abund=organizing_funct(txi_seedling_abund)
-txi_embryo_abund=organizing_funct(txi_embryo_abund)
-txi_meristem_abund=organizing_funct(txi_meristem_abund)
-
-
-txi_blade_abund=organizing_funct(txi_blade_abund)
-txi_coleoptile_abund=organizing_funct(txi_coleoptile_abund)
-txi_radicle_abund=organizing_funct(txi_radicle_abund)
-txi_root_abund=organizing_funct(txi_root_abund)
-
-
-#### writing them: 
-
-write.csv(txi_ear_abund, "./04_29_2024_txi_abundance_tpm_files/txi_ear_abund.csv")
-write.csv(txi_tassel_abund, "./04_29_2024_txi_abundance_tpm_files/txi_tassel_abund.csv")
-write.csv(txi_seedling_abund, "./04_29_2024_txi_abundance_tpm_files/txi_seedling_abund.csv")
-write.csv(txi_embryo_abund, "./04_29_2024_txi_abundance_tpm_files/txi_embryo_abund.csv")
-write.csv(txi_meristem_abund, "./04_29_2024_txi_abundance_tpm_files/txi_meristem_abund.csv")
-
-write.csv(txi_blade_abund, "./04_29_2024_txi_abundance_tpm_files/txi_blade_abund.csv")
-write.csv(txi_coleoptile_abund, "./04_29_2024_txi_abundance_tpm_files/txi_coleoptile_abund.csv")
-write.csv(txi_radicle_abund, "./04_29_2024_txi_abundance_tpm_files/txi_radicle_abund.csv")
-write.csv(txi_root_abund, "./04_29_2024_txi_abundance_tpm_files/txi_root_abund.csv")
-
 
 
 ```
@@ -299,11 +142,6 @@ sample_table_root= sample_table_funct("root_0DAP")
 "blade_v12"      "coleoptile_tip" "radicle_root"   "root_0DAP"  
 
 ## DESeq2 {.tabset}
-
-<https://bioconductor.org/packages/devel/bioc/vignettes/DESeq2/inst/doc/DESeq2.html#differential-expression-analysis>
-
-Reminder, we have 5 conditions: ear, tassel, seedling, embryo, meristem
-
 
 
 
@@ -411,7 +249,7 @@ for (i in 1:9){
 
 ## DEG cut-offs {.tabset}
 
-```{r, eval=F}
+```{r}
 
 ### DEG cut offs are : abs(log2fc) > 2 (so FC =4) and padj < 0.05  
 
@@ -430,28 +268,8 @@ df_res_coleoptile=as.data.frame(res_coleoptile)
 df_res_radicle=as.data.frame(res_radicle)
 df_res_root=as.data.frame(res_root)
 
-write.csv(df_res_ear, "./05_22_2024_manuscript_data/df_res_ear.csv")
-write.csv(df_res_meristem,"./05_22_2024_manuscript_data/df_res_meristem.csv")
-write.csv(df_res_tassel,"./05_22_2024_manuscript_data/df_res_tassel.csv")
-write.csv(df_res_embryo,"./05_22_2024_manuscript_data/df_res_embryo.csv")
-write.csv(df_res_seedling, "./05_22_2024_manuscript_data/df_res_seedling.csv")
-write.csv(df_res_blade, "./05_22_2024_manuscript_data/df_res_blade.csv")
-write.csv(df_res_coleoptile, "./05_22_2024_manuscript_data/df_res_coleoptile.csv")
-write.csv(df_res_radicle, "./05_22_2024_manuscript_data/df_res_radicle.csv")
-write.csv(df_res_root, "./05_22_2024_manuscript_data/df_res_root.csv")
 ```
 
-```{r}
-df_res_ear=read.csv("./05_22_2024_manuscript_data/df_res_ear.csv", row.names = 1)
-df_res_meristem=read.csv("./05_22_2024_manuscript_data/df_res_meristem.csv", row.names = 1)
-df_res_tassel=read.csv("./05_22_2024_manuscript_data/df_res_tassel.csv", row.names = 1)
-df_res_embryo=read.csv("./05_22_2024_manuscript_data/df_res_embryo.csv", row.names = 1)
-df_res_seedling=read.csv("./05_22_2024_manuscript_data/df_res_seedling.csv", row.names = 1)
-df_res_blade=read.csv("./05_22_2024_manuscript_data/df_res_blade.csv", row.names = 1)
-df_res_coleoptile=read.csv("./05_22_2024_manuscript_data/df_res_coleoptile.csv", row.names = 1)
-df_res_radicle=read.csv("./05_22_2024_manuscript_data/df_res_radicle.csv", row.names = 1)
-df_res_root=read.csv("./05_22_2024_manuscript_data/df_res_root.csv", row.names = 1)
-```
 
 
 ```{r}
@@ -471,12 +289,8 @@ sum(res_seedling_DEG$log2FoldChange < 0)
 
 ```
 
-for log2fc is it B73 vs. Mo17 or Mo17 vs. B73? --\> sampletable =
-sampletable %\>% mutate(condition= factor(condition, levels=c("Mo17",
-"B73"))) --\> this means that Mo17 is the baseline so B73 would be
-either upregulated or downregulated in comparison. --\> log2FC \> 0
-means that expression is higher in B73. double check this by looking at
-some genes.
+this means that Mo17 is the baseline so B73 would be
+either upregulated or downregulated in comparison
 
 **checking that DEGs are correct**
 
@@ -569,7 +383,6 @@ df_res_ear %>% dplyr::filter(row.names(df_res_ear) %in% test$geneId)
 ```
 
 there is a loss of genes from posV files because they aren't expressed in our res ear df. 
-
 
 
 ```{r}
@@ -1011,16 +824,7 @@ bind_rows(entire_fisher_table)
 write.csv(bind_rows(entire_fisher_table),"05_24_2024_df_for_carol.csv")
 
 
-
 ```
-
-
-
-
-
-
-
-
 
 
 
