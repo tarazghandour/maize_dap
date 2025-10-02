@@ -50,7 +50,7 @@ getwd()
 ```
 
 for deg, compare b73 and mo17 lift off.\
-I needed to run rsem 5 times for the 5 conditions.
+
 
 
 ## testing for consistency between gene ids: {.tabset}
@@ -70,9 +70,6 @@ read.table("Mo17_genome_B73_liftoff_gff/SRR7548396_paired_end_qual.genes.results
 
 read.table("B73_genome_B73_liftoff_gff/SRR7548231_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
 read.table("Mo17_genome_B73_liftoff_gff/SRR7548236_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
-
-#blade files: 
-read.table("B73_genome_B73_liftoff_gff/SRR7548306_paired_end_qual.genes.results", header = TRUE, stringsAsFactors=F, sep="\t")
 
 
 ```
@@ -112,7 +109,7 @@ txi_list=list(txi_ear,
 
 ## DESeq2 {.tabset}
 
-make a new function for sample table that uses SRR_file_final table.
+
 
 ```{r, eval=F}
 
@@ -871,8 +868,7 @@ head(all_dataframes[[1]][["geneId"]])
 names(all_dataframes)[1]
 
 ## why are there 133? shouldn't it be an even number??
-
-testing_something= gsub("-shared|-specific", "",names(all_dataframes))
+gsub("-shared|-specific", "",names(all_dataframes))
 # BZIP86_rep1_B73 is the outlier. this TF has 3 files: shared, specific, and rep1 shared.
 
 ```
